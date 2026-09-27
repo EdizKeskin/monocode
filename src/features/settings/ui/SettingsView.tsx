@@ -279,6 +279,7 @@ import {
   loadFollowUpBehavior,
   loadFormatOnSave,
   loadGridArcadeEnabled,
+  loadKeepAwakeEnabled,
   loadLiveAgentsEnabled,
   loadModelControls,
   loadNotesEnabled,
@@ -295,6 +296,7 @@ import {
   saveFollowUpBehavior,
   saveFormatOnSave,
   saveGridArcadeEnabled,
+  saveKeepAwakeEnabled,
   saveLiveAgentsEnabled,
   saveModelControls,
   saveNotesEnabled,
@@ -302,6 +304,7 @@ import {
   validateKeybindingShortcut,
   saveQuickComposerEnabled,
   saveQuickComposerShortcut,
+  subscribeKeepAwakeEnabled,
   subscribeKeybindings,
   type KeybindingOverride,
   saveTabAnimationsEnabled,
@@ -714,6 +717,11 @@ function GeneralPage({
     loadTabAnimationsEnabled,
   );
   const [closeToTray, setCloseToTray] = useState(loadCloseToTray);
+  const keepAwake = useSyncExternalStore(
+    subscribeKeepAwakeEnabled,
+    loadKeepAwakeEnabled,
+    () => false,
+  );
   const [quickComposerEnabled, setQuickComposerEnabled] = useState(
     loadQuickComposerEnabled,
   );
@@ -779,6 +787,10 @@ function GeneralPage({
   const onCloseToTray = (next: boolean) => {
     saveCloseToTray(next);
     setCloseToTray(next);
+  };
+
+  const onKeepAwake = (next: boolean) => {
+    saveKeepAwakeEnabled(next);
   };
 
   return (
@@ -885,6 +897,19 @@ function GeneralPage({
             onChange={onLiveAgentsEnabled}
           />
         </Row>
+        {IS_WIN && (
+          <Row
+            id="keep-awake"
+            label="Prevent sleep while agents work"
+            description="Prevent system sleep caused by inactivity while an agent is actively working."
+          >
+            <Toggle
+              label="Prevent sleep while agents work"
+              on={keepAwake}
+              onChange={onKeepAwake}
+            />
+          </Row>
+        )}
         {IS_WIN && (
           <Row
             id="close-to-tray"

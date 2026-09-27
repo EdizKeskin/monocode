@@ -1,0 +1,141 @@
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { newSession, type Session } from "../../sessions/model/session";
+import {
+  createKeepAwakeController,
+  isWorkingSession,
+  useKeepAwake,
+} from "./keepAwake";
+import { saveKeepAwakeEnabled } from "./settings";
+
+vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tauri-apps/api/core")>()),
+  invoke: vi.fn(async () => undefined),
+  isTauri: vi.fn(() => true),
+}));
+vi.mock("../../../platform/tauri/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../platform/tauri/platform")>()),
+  IS_WIN: true,
+}));
+
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  localStorage.clear();
+  vi.mocked(invoke).mockClear();
+  vi.mocked(isTauri).mockReturnValue(true);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+const session = (id: string, busy = false) => ({
+  ...newSession("claude", "/repo"),
+  id,
+  busy,
+});
+
+describe("keep awake", () => {
+  it("counts only actively working sessions across providers", () => {
+    const completed = session("completed");
+    const queued = { ...session("queued"), queueStatus: "paused" as const };
+    const waiting = {
+      ...session("waiting", true),
+      pendingQuestion: { requestId: 1, questions: [] },
+    };
+    const removed = { ...session("removed", true), worktreeRemoved: true };
+    expect(isWorkingSession(completed)).toBe(false);
+    expect(isWorkingSession(queued)).toBe(false);
+    expect(isWorkingSession(waiting)).toBe(false);
+    expect(isWorkingSession(removed)).toBe(false);
+    expect(
+      isWorkingSession({ ...session("codex", true), harness: "codex" as const }),
+    ).toBe(true);
+  });
+
+  it("holds the request until the last concurrent agent finishes", async () => {
+    const send = vi.fn(async (_enabled: boolean) => undefined);
+    const controller = createKeepAwakeController(send);
+    const first = session("first", true);
+    const second = { ...session("second", true), harness: "codex" as const };
+
+    controller.update(true, [first, second]);
+    controller.update(true, [{ ...first, busy: false }, second]);
+    await controller.settled();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(true);
+
+    controller.update(true, [{ ...first, busy: false }, { ...second, busy: false }]);
+    await controller.settled();
+    expect(send).toHaveBeenLastCalledWith(false);
+  });
+
+  it("releases on setting off or window teardown in IPC order", async () => {
+    const transitions: boolean[] = [];
+    const controller = createKeepAwakeController(async (enabled) => {
+      await Promise.resolve();
+      transitions.push(enabled);
+    });
+    const working = session("working", true);
+    controller.update(true, [working]);
+    controller.update(false, [working]);
+    controller.update(true, [working]);
+    controller.release();
+    controller.update(true, [working]);
+    await controller.settled();
+    expect(transitions).toEqual([true, false, true, false]);
+  });
+
+  it("continues after a rejected IPC request", async () => {
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValue(undefined);
+    const controller = createKeepAwakeController(send);
+    controller.update(true, [session("working", true)]);
+    controller.release();
+    await controller.settled();
+    expect(send.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("does not invoke native IPC in a browser preview", async () => {
+    vi.mocked(isTauri).mockReturnValue(false);
+    saveKeepAwakeEnabled(true);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const Harness = ({ sessions }: { sessions: Session[] }) => {
+      useKeepAwake(sessions);
+      return null;
+    };
+    await act(async () => {
+      root.render(createElement(Harness, { sessions: [session("active", true)] }));
+    });
+    await act(async () => root.unmount());
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("reports this window's activity and releases it on pagehide", async () => {
+    saveKeepAwakeEnabled(true);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const Harness = ({ sessions }: { sessions: Session[] }) => {
+      useKeepAwake(sessions);
+      return null;
+    };
+    await act(async () => {
+      root.render(createElement(Harness, { sessions: [session("active", true)] }));
+    });
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("set_keep_awake", { enabled: true }),
+    );
+    window.dispatchEvent(new Event("pagehide"));
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenLastCalledWith("set_keep_awake", { enabled: false }),
+    );
+    await act(async () => root.unmount());
+  });
+});

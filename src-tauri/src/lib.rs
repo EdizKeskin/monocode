@@ -14,6 +14,7 @@ mod gitlab;
 mod harness;
 mod inbox_media;
 mod jira;
+mod keep_awake;
 mod linear;
 mod link_preview;
 #[cfg(target_os = "macos")]
@@ -219,6 +220,7 @@ pub fn run() {
                 .build(),
         )
         .manage(harness::HarnessHost::new())
+        .manage(keep_awake::KeepAwakeState::new())
         .manage(pty::PtyHost::new())
         .manage(window_transfer::WindowTransferState::new())
         .setup(|app| {
@@ -264,6 +266,7 @@ pub fn run() {
             control::app_cli_path,
             default_cwd,
             home_dir,
+            keep_awake::set_keep_awake,
             notifications::notification_permission,
             notifications::request_notification_permission,
             notifications::show_notification,
@@ -538,6 +541,9 @@ pub fn run() {
                 .iter()
                 .any(|window| window.label() != label);
             control::window_closed(handle, &label);
+            if let Some(state) = handle.try_state::<keep_awake::KeepAwakeState>() {
+                state.window_closed(&label);
+            }
             if !other_window {
                 reap_harness_children(handle);
             }
@@ -556,6 +562,9 @@ pub fn run() {
             window::request_quit(handle);
         }
         tauri::RunEvent::Exit => {
+            if let Some(state) = handle.try_state::<keep_awake::KeepAwakeState>() {
+                state.shutdown();
+            }
             reap_harness_children(handle);
         }
         _ => {}

@@ -207,6 +207,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   ...(IS_WIN
     ? [
         {
+          id: "keep-awake",
+          section: "general" as const,
+          label: "Prevent sleep while agents work",
+          keywords: "sleep awake idle running agents windows",
+        },
+        {
           id: "close-to-tray",
           section: "general" as const,
           label: "Close to tray",
@@ -773,6 +779,36 @@ export function subscribeLiveAgentsEnabled(onStoreChange: () => void) {
 }
 
 const CLOSE_TO_TRAY_KEY = "monocode.closeToTray";
+
+const KEEP_AWAKE_KEY = "monocode.keepAwakeWhileAgentsWork";
+export const KEEP_AWAKE_DEFAULT = false;
+export const KEEP_AWAKE_CHANGE_EVENT = "monocode:keep-awake-change";
+
+export function loadKeepAwakeEnabled(): boolean {
+  if (!IS_WIN) return false;
+  return readFlag(KEEP_AWAKE_KEY) ?? KEEP_AWAKE_DEFAULT;
+}
+
+export function saveKeepAwakeEnabled(value: boolean): void {
+  writeFlag(KEEP_AWAKE_KEY, value);
+  if (typeof window !== "undefined")
+    window.dispatchEvent(
+      new CustomEvent<boolean>(KEEP_AWAKE_CHANGE_EVENT, { detail: value }),
+    );
+}
+
+export function subscribeKeepAwakeEnabled(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === KEEP_AWAKE_KEY || event.key === null) onChange();
+  };
+  window.addEventListener(KEEP_AWAKE_CHANGE_EVENT, onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(KEEP_AWAKE_CHANGE_EVENT, onChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
 
 export const CLOSE_TO_TRAY_DEFAULT = true;
 

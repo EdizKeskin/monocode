@@ -20,6 +20,14 @@ import {
   HARNESS_TITLE,
 } from "../../sessions/model/session";
 
+const platform = vi.hoisted(() => ({ isWindows: false }));
+vi.mock("../../../platform/tauri/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../platform/tauri/platform")>()),
+  get IS_WIN() {
+    return platform.isWindows;
+  },
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async () => undefined),
   convertFileSrc: (path: string) => path,
@@ -89,6 +97,7 @@ function renderedSettingIds(): string[] {
 }
 
 beforeEach(() => {
+  platform.isWindows = false;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   mockLocalStorage();
   container = document.createElement("div");
@@ -108,6 +117,26 @@ afterEach(async () => {
 });
 
 describe("settings pages", () => {
+  it("shows the off-by-default sleep setting only on Windows", async () => {
+    await render("general");
+    expect(
+      container.querySelector('[aria-label="Prevent sleep while agents work"]'),
+    ).toBeNull();
+
+    platform.isWindows = true;
+    await render("general");
+    const toggle = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Prevent sleep while agents work"]',
+    )!;
+    expect(toggle?.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.closest(".settings-row")?.textContent).toContain(
+      "Prevent system sleep caused by inactivity",
+    );
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(localStorage.getItem("monocode.keepAwakeWhileAgentsWork")).toBe("1");
+  });
+
   it("shows background effect choices above scope when artwork is available", async () => {
     localStorage.setItem(
       "monocode.chatBackgroundPath",

@@ -67,6 +67,13 @@ describe.each([
     "monocode:live-agents-enabled-change",
   ],
   [
+    "monocode.keepAwakeWhileAgentsWork",
+    settings.loadKeepAwakeEnabled,
+    settings.saveKeepAwakeEnabled,
+    false,
+    settings.KEEP_AWAKE_CHANGE_EVENT,
+  ],
+  [
     "monocode.closeToTray",
     settings.loadCloseToTray,
     settings.saveCloseToTray,
@@ -194,4 +201,31 @@ it("disables close-to-tray outside Windows without consulting storage", () => {
 
   expect(settings.loadCloseToTray()).toBe(false);
   expect(read).not.toHaveBeenCalled();
+});
+
+it("disables keep-awake outside Windows without consulting storage", () => {
+  platform.isWindows = false;
+  settings.saveKeepAwakeEnabled(true);
+  const read = vi.spyOn(localStorage, "getItem");
+
+  expect(settings.loadKeepAwakeEnabled()).toBe(false);
+  expect(read).not.toHaveBeenCalled();
+});
+
+it("notifies another window when the keep-awake setting changes", () => {
+  const listener = vi.fn();
+  const unsubscribe = settings.subscribeKeepAwakeEnabled(listener);
+  window.dispatchEvent(
+    new StorageEvent("storage", {
+      key: "monocode.keepAwakeWhileAgentsWork",
+    }),
+  );
+  expect(listener).toHaveBeenCalledTimes(1);
+  unsubscribe();
+  window.dispatchEvent(
+    new StorageEvent("storage", {
+      key: "monocode.keepAwakeWhileAgentsWork",
+    }),
+  );
+  expect(listener).toHaveBeenCalledTimes(1);
 });
