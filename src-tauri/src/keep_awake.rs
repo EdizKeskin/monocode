@@ -1,13 +1,14 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use tauri::WebviewWindow;
 
 const REASON: &str = "MonoCode agent is working";
 
-/// Invoke `set_keep_awake` with `{ enabled: boolean }` from each workspace
+/// Invoke `set_keep_awake` with `{ enabled, display }` from each workspace
 /// window when its own agent activity changes. Repeated values are safe. A
-/// window's `false` only releases that window's claim.
+/// window's `false` only releases that window's claim. Display preference is
+/// stored per window and OR-aggregated onto the shared native request.
 #[tauri::command]
 pub fn set_keep_awake(
     window: WebviewWindow,
@@ -27,7 +28,7 @@ trait RequestBackend {
 
 struct Claims<B: RequestBackend> {
     backend: B,
-    windows: HashSet<String>,
+    windows: HashMap<String, bool>,
     request: Option<B::Handle>,
     display: bool,
 }
@@ -36,38 +37,62 @@ impl<B: RequestBackend> Claims<B> {
     fn new(backend: B) -> Self {
         Self {
             backend,
-            windows: HashSet::new(),
+            windows: HashMap::new(),
             request: None,
             display: false,
         }
     }
 
-    fn set(&mut self, window: &str, enabled: bool, display: bool) -> Result<(), String> {
-        if enabled {
-            if self.windows.contains(window) && self.request.is_some() && self.display == display {
-                return Ok(());
-            }
-            if self.request.is_some() && self.display != display {
-                if let Some(request) = self.request.take() {
-                    self.backend.release(request)?;
-                }
-            }
-            if self.request.is_none() {
-                self.request = Some(self.backend.acquire(display)?);
-                self.display = display;
-            }
-            self.windows.insert(window.to_owned());
-        } else if self.windows.remove(window) && self.windows.is_empty() {
+    fn desired_display(&self) -> bool {
+        self.windows.values().any(|&display| display)
+    }
+
+    fn sync_request(&mut self) -> Result<(), String> {
+        if self.windows.is_empty() {
+            self.display = false;
             if let Some(request) = self.request.take() {
                 self.backend.release(request)?;
             }
-            self.display = false;
+            return Ok(());
+        }
+        let display = self.desired_display();
+        if self.request.is_some() && self.display == display {
+            return Ok(());
+        }
+        if let Some(request) = self.request.take() {
+            self.backend.release(request)?;
+        }
+        self.request = Some(self.backend.acquire(display)?);
+        self.display = display;
+        Ok(())
+    }
+
+    fn set(&mut self, window: &str, enabled: bool, display: bool) -> Result<(), String> {
+        if enabled {
+            if self.windows.get(window) == Some(&display) && self.request.is_some() {
+                return Ok(());
+            }
+            let previous = self.windows.insert(window.to_owned(), display);
+            if let Err(error) = self.sync_request() {
+                match previous {
+                    Some(previous) => {
+                        self.windows.insert(window.to_owned(), previous);
+                    }
+                    None => {
+                        self.windows.remove(window);
+                    }
+                }
+                return Err(error);
+            }
+        } else if self.windows.remove(window).is_some() {
+            self.sync_request()?;
         }
         Ok(())
     }
 
     fn release_all(&mut self) -> Result<(), String> {
         self.windows.clear();
+        self.display = false;
         if let Some(request) = self.request.take() {
             self.backend.release(request)?;
         }
@@ -93,7 +118,7 @@ mod windows_backend {
 
     pub struct WindowsPowerBackend;
 
-    struct WindowsHandle {
+    pub(super) struct WindowsHandle {
         handle: OwnedHandle,
         display: bool,
     }
@@ -226,7 +251,7 @@ mod macos_backend {
 
     pub struct MacosIdleBackend;
 
-    struct MacosHandle {
+    pub(super) struct MacosHandle {
         system: u32,
         display: Option<u32>,
     }
@@ -514,7 +539,7 @@ mod tests {
         claims.set("first", false, false).unwrap();
         claims.set("first", false, false).unwrap();
         assert_eq!(claims.backend.released.load(Ordering::SeqCst), 0);
-        assert!(claims.windows.contains("second"));
+        assert!(claims.windows.contains_key("second"));
 
         claims.set("second", false, false).unwrap();
         assert_eq!(claims.backend.released.load(Ordering::SeqCst), 1);
@@ -559,6 +584,32 @@ mod tests {
         claims.set("first", true, true).unwrap();
         assert_eq!(claims.backend.released.load(Ordering::SeqCst), 1);
         assert_eq!(claims.backend.acquired.load(Ordering::SeqCst), 2);
+        assert!(claims.display);
+    }
+
+    #[test]
+    fn mixed_window_display_preferences_keep_the_stronger_claim() {
+        let mut claims = Claims::new(MockBackend::default());
+        claims.set("first", true, true).unwrap();
+        claims.set("second", true, false).unwrap();
+        assert_eq!(claims.backend.acquired.load(Ordering::SeqCst), 1);
+        assert_eq!(claims.backend.released.load(Ordering::SeqCst), 0);
+        assert!(claims.display);
+
+        claims.set("second", false, false).unwrap();
+        assert_eq!(claims.backend.acquired.load(Ordering::SeqCst), 1);
+        assert_eq!(claims.backend.released.load(Ordering::SeqCst), 0);
+        assert!(claims.display);
+
+        claims.set("second", true, false).unwrap();
+        claims.set("first", false, false).unwrap();
+        assert_eq!(claims.backend.released.load(Ordering::SeqCst), 1);
+        assert_eq!(claims.backend.acquired.load(Ordering::SeqCst), 2);
+        assert!(!claims.display);
+
+        claims.set("first", true, true).unwrap();
+        assert_eq!(claims.backend.released.load(Ordering::SeqCst), 2);
+        assert_eq!(claims.backend.acquired.load(Ordering::SeqCst), 3);
         assert!(claims.display);
     }
 }
