@@ -901,7 +901,7 @@ function GeneralPage({
           <Row
             id="keep-awake"
             label="Prevent sleep while agents work"
-            description="Prevent system sleep caused by inactivity while an agent is actively working."
+            description="Prevent idle sleep during agent work. On battery-powered Modern Standby PCs, Windows may stop the request five minutes after the sleep timeout."
           >
             <Toggle
               label="Prevent sleep while agents work"

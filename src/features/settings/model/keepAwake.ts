@@ -8,13 +8,14 @@ import {
 } from "./settings";
 
 // React StrictMode can replace a controller before its final IPC settles.
-let nativeQueue = Promise.resolve();
+let nativeQueue: Promise<void> = Promise.resolve();
 
 function sendNative(enabled: boolean): Promise<void> {
-  nativeQueue = nativeQueue
-    .then(() => invoke("set_keep_awake", { enabled }))
-    .then(() => undefined, () => undefined);
-  return nativeQueue;
+  const operation = nativeQueue.then(() =>
+    invoke<void>("set_keep_awake", { enabled }),
+  );
+  nativeQueue = operation.then(() => undefined, () => undefined);
+  return operation;
 }
 
 /** A pending approval/question is not active work even when busy is still set. */
@@ -30,15 +31,26 @@ export function createKeepAwakeController(
 ) {
   let desired = false;
   let disposed = false;
+  let failed = false;
   let pending = Promise.resolve();
 
   const set = (enabled: boolean) => {
-    if (desired === enabled) return;
+    if (desired === enabled && !failed) return;
     desired = enabled;
+    failed = false;
     // Preserve transition order if a turn finishes before the first IPC returns.
-    pending = pending
-      .then(() => send(enabled))
-      .then(() => undefined, () => undefined);
+    pending = pending.then(async () => {
+      try {
+        await send(enabled);
+      } catch {
+        if (desired !== enabled) return;
+        try {
+          await send(enabled);
+        } catch {
+          if (desired === enabled) failed = true;
+        }
+      }
+    });
   };
 
   return {

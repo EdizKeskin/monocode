@@ -24,7 +24,8 @@ vi.mock("../../../platform/tauri/platform", async (importOriginal) => ({
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
-  vi.mocked(invoke).mockClear();
+  vi.mocked(invoke).mockReset();
+  vi.mocked(invoke).mockResolvedValue(undefined);
   vi.mocked(isTauri).mockReturnValue(true);
 });
 
@@ -102,6 +103,36 @@ describe("keep awake", () => {
     expect(send.mock.calls).toEqual([[true], [false]]);
   });
 
+  it("retries a failed enable while the agent is still working", async () => {
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValue(undefined);
+    const controller = createKeepAwakeController(send);
+
+    controller.update(true, [session("working", true)]);
+    await controller.settled();
+    expect(send.mock.calls).toEqual([[true], [true]]);
+  });
+
+  it("allows a later update to retry after both enable attempts fail", async () => {
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockRejectedValueOnce(new Error("still unavailable"))
+      .mockResolvedValue(undefined);
+    const controller = createKeepAwakeController(send);
+    const working = session("working", true);
+
+    controller.update(true, [working]);
+    await controller.settled();
+    expect(send.mock.calls).toEqual([[true], [true]]);
+
+    controller.update(true, [working]);
+    await controller.settled();
+    expect(send.mock.calls).toEqual([[true], [true], [true]]);
+  });
+
   it("does not invoke native IPC in a browser preview", async () => {
     vi.mocked(isTauri).mockReturnValue(false);
     saveKeepAwakeEnabled(true);
@@ -116,6 +147,30 @@ describe("keep awake", () => {
     });
     await act(async () => root.unmount());
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("retries a rejected native invoke while work remains active", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("power request failed"));
+    saveKeepAwakeEnabled(true);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const Harness = ({ sessions }: { sessions: Session[] }) => {
+      useKeepAwake(sessions);
+      return null;
+    };
+
+    await act(async () => {
+      root.render(createElement(Harness, { sessions: [session("active", true)] }));
+    });
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(invoke).mock.calls.filter(
+          ([command, args]) =>
+            command === "set_keep_awake" && args?.enabled === true,
+        ),
+      ).toHaveLength(2),
+    );
+    await act(async () => root.unmount());
   });
 
   it("reports this window's activity and releases it on pagehide", async () => {

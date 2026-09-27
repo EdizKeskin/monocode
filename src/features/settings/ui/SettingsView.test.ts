@@ -130,7 +130,10 @@ describe("settings pages", () => {
     )!;
     expect(toggle?.getAttribute("aria-checked")).toBe("false");
     expect(toggle.closest(".settings-row")?.textContent).toContain(
-      "Prevent system sleep caused by inactivity",
+      "Prevent idle sleep during agent work",
+    );
+    expect(toggle.closest(".settings-row")?.textContent).toContain(
+      "battery-powered Modern Standby",
     );
     await act(async () => toggle.click());
     expect(toggle.getAttribute("aria-checked")).toBe("true");
