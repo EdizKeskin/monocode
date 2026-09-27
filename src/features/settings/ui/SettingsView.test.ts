@@ -117,27 +117,48 @@ afterEach(async () => {
 });
 
 describe("settings pages", () => {
-  it("shows the off-by-default sleep setting only on Windows", async () => {
+  it("shows the off-by-default sleep setting on every platform", async () => {
     await render("general");
-    expect(
-      container.querySelector('[aria-label="Prevent sleep while agents work"]'),
-    ).toBeNull();
+    const toggle = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Prevent sleep while agents work"]',
+    )!;
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.closest(".settings-row")?.textContent).toContain(
+      "Prevent idle sleep during agent work",
+    );
+    expect(toggle.closest(".settings-row")?.textContent).not.toContain(
+      "battery-powered Modern Standby",
+    );
 
+    const hold = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Stay awake after an agent ends: When it ends"]',
+    )!;
+    expect(hold.closest(".settings-row")).toBe(toggle.closest(".settings-row"));
+    expect(
+      hold.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(localStorage.getItem("monocode.keepAwakeWhileAgentsWork")).toBe("1");
+
+    await act(async () => hold.click());
+    const fifteen = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ).find((button) => button.textContent?.includes("15 minutes"))!;
+    await act(async () => fifteen.click());
+    expect(localStorage.getItem("monocode.keepAwakeHoldAfter")).toBe("15m");
+  });
+
+  it("mentions the Windows Modern Standby limit only on Windows", async () => {
     platform.isWindows = true;
     await render("general");
     const toggle = container.querySelector<HTMLButtonElement>(
       '[aria-label="Prevent sleep while agents work"]',
     )!;
-    expect(toggle?.getAttribute("aria-checked")).toBe("false");
-    expect(toggle.closest(".settings-row")?.textContent).toContain(
-      "Prevent idle sleep during agent work",
-    );
     expect(toggle.closest(".settings-row")?.textContent).toContain(
       "battery-powered Modern Standby",
     );
-    await act(async () => toggle.click());
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
-    expect(localStorage.getItem("monocode.keepAwakeWhileAgentsWork")).toBe("1");
   });
 
   it("shows background effect choices above scope when artwork is available", async () => {

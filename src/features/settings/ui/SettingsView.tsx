@@ -279,7 +279,11 @@ import {
   loadFollowUpBehavior,
   loadFormatOnSave,
   loadGridArcadeEnabled,
+  KEEP_AWAKE_HOLD_AFTER,
+  KEEP_AWAKE_HOLD_AFTER_DEFAULT,
+  isKeepAwakeHoldAfter,
   loadKeepAwakeEnabled,
+  loadKeepAwakeHoldAfter,
   loadLiveAgentsEnabled,
   loadModelControls,
   loadNotesEnabled,
@@ -297,6 +301,7 @@ import {
   saveFormatOnSave,
   saveGridArcadeEnabled,
   saveKeepAwakeEnabled,
+  saveKeepAwakeHoldAfter,
   saveLiveAgentsEnabled,
   saveModelControls,
   saveNotesEnabled,
@@ -305,6 +310,7 @@ import {
   saveQuickComposerEnabled,
   saveQuickComposerShortcut,
   subscribeKeepAwakeEnabled,
+  subscribeKeepAwakeHoldAfter,
   subscribeKeybindings,
   type KeybindingOverride,
   saveTabAnimationsEnabled,
@@ -722,6 +728,11 @@ function GeneralPage({
     loadKeepAwakeEnabled,
     () => false,
   );
+  const keepAwakeHoldAfter = useSyncExternalStore(
+    subscribeKeepAwakeHoldAfter,
+    loadKeepAwakeHoldAfter,
+    () => KEEP_AWAKE_HOLD_AFTER_DEFAULT,
+  );
   const [quickComposerEnabled, setQuickComposerEnabled] = useState(
     loadQuickComposerEnabled,
   );
@@ -791,6 +802,10 @@ function GeneralPage({
 
   const onKeepAwake = (next: boolean) => {
     saveKeepAwakeEnabled(next);
+  };
+
+  const onKeepAwakeHoldAfter = (next: string) => {
+    if (isKeepAwakeHoldAfter(next)) saveKeepAwakeHoldAfter(next);
   };
 
   return (
@@ -897,19 +912,27 @@ function GeneralPage({
             onChange={onLiveAgentsEnabled}
           />
         </Row>
-        {IS_WIN && (
-          <Row
-            id="keep-awake"
+        <Row
+          id="keep-awake"
+          label="Prevent sleep while agents work"
+          description={
+            IS_WIN
+              ? "Prevent idle sleep during agent work, and optionally after the last agent finishes. Closing the lid or choosing Sleep still works. On battery-powered Modern Standby PCs, Windows may stop the request five minutes after the sleep timeout."
+              : "Prevent idle sleep during agent work, and optionally after the last agent finishes. Closing the lid or choosing Sleep still works."
+          }
+        >
+          <Select
+            label="Stay awake after an agent ends"
+            value={keepAwakeHoldAfter}
+            options={[...KEEP_AWAKE_HOLD_AFTER]}
+            onChange={onKeepAwakeHoldAfter}
+          />
+          <Toggle
             label="Prevent sleep while agents work"
-            description="Prevent idle sleep during agent work. On battery-powered Modern Standby PCs, Windows may stop the request five minutes after the sleep timeout."
-          >
-            <Toggle
-              label="Prevent sleep while agents work"
-              on={keepAwake}
-              onChange={onKeepAwake}
-            />
-          </Row>
-        )}
+            on={keepAwake}
+            onChange={onKeepAwake}
+          />
+        </Row>
         {IS_WIN && (
           <Row
             id="close-to-tray"

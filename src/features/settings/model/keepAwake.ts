@@ -1,10 +1,13 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { IS_WIN } from "../../../platform/tauri/platform";
 import { sessionNeedsInput, type Session } from "../../sessions/model/session";
 import {
+  KEEP_AWAKE_HOLD_AFTER_DEFAULT,
+  keepAwakeHoldAfterMs,
   loadKeepAwakeEnabled,
+  loadKeepAwakeHoldAfter,
   subscribeKeepAwakeEnabled,
+  subscribeKeepAwakeHoldAfter,
 } from "./settings";
 
 // React StrictMode can replace a controller before its final IPC settles.
@@ -14,7 +17,10 @@ function sendNative(enabled: boolean): Promise<void> {
   const operation = nativeQueue.then(() =>
     invoke<void>("set_keep_awake", { enabled }),
   );
-  nativeQueue = operation.then(() => undefined, () => undefined);
+  nativeQueue = operation.then(
+    () => undefined,
+    () => undefined,
+  );
   return operation;
 }
 
@@ -25,6 +31,8 @@ export function isWorkingSession(session: Session): boolean {
   );
 }
 
+type KeepAwakePhase = "off" | "working" | "holding";
+
 /** Each webview reports only its own activity; the native command combines windows. */
 export function createKeepAwakeController(
   send: (enabled: boolean) => Promise<unknown>,
@@ -33,6 +41,15 @@ export function createKeepAwakeController(
   let disposed = false;
   let failed = false;
   let pending = Promise.resolve();
+  let phase: KeepAwakePhase = "off";
+  let holdSince = 0;
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearTimer = () => {
+    if (holdTimer == null) return;
+    clearTimeout(holdTimer);
+    holdTimer = null;
+  };
 
   const set = (enabled: boolean) => {
     if (desired === enabled && !failed) return;
@@ -53,12 +70,64 @@ export function createKeepAwakeController(
     });
   };
 
+  const applyHold = (holdAfterMs: number) => {
+    if (holdAfterMs <= 0) {
+      phase = "off";
+      clearTimer();
+      set(false);
+      return;
+    }
+    if (!Number.isFinite(holdAfterMs)) {
+      clearTimer();
+      set(true);
+      return;
+    }
+    const remaining = holdSince + holdAfterMs - Date.now();
+    if (remaining <= 0) {
+      phase = "off";
+      clearTimer();
+      set(false);
+      return;
+    }
+    clearTimer();
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      phase = "off";
+      set(false);
+    }, remaining);
+    set(true);
+  };
+
   return {
-    update(enabled: boolean, sessions: readonly Session[]) {
-      if (!disposed) set(enabled && sessions.some(isWorkingSession));
+    update(enabled: boolean, sessions: readonly Session[], holdAfterMs = 0) {
+      if (disposed) return;
+      const busy = sessions.some(isWorkingSession);
+      if (!enabled) {
+        phase = "off";
+        clearTimer();
+        set(false);
+        return;
+      }
+      if (busy) {
+        phase = "working";
+        clearTimer();
+        set(true);
+        return;
+      }
+      if (phase === "working") {
+        phase = "holding";
+        holdSince = Date.now();
+      }
+      if (phase !== "holding") {
+        set(false);
+        return;
+      }
+      applyHold(holdAfterMs);
     },
     release() {
       if (disposed) return;
+      phase = "off";
+      clearTimer();
       set(false);
       disposed = true;
     },
@@ -72,11 +141,17 @@ export function useKeepAwake(sessions: readonly Session[]): void {
     loadKeepAwakeEnabled,
     () => false,
   );
-  const controller =
-    useRef<ReturnType<typeof createKeepAwakeController> | null>(null);
+  const holdAfter = useSyncExternalStore(
+    subscribeKeepAwakeHoldAfter,
+    loadKeepAwakeHoldAfter,
+    () => KEEP_AWAKE_HOLD_AFTER_DEFAULT,
+  );
+  const controller = useRef<ReturnType<
+    typeof createKeepAwakeController
+  > | null>(null);
 
   useEffect(() => {
-    if (!IS_WIN || !isTauri()) return;
+    if (!isTauri()) return;
     const current = createKeepAwakeController(sendNative);
     controller.current = current;
     const release = () => current.release();
@@ -91,6 +166,10 @@ export function useKeepAwake(sessions: readonly Session[]): void {
   }, []);
 
   useEffect(() => {
-    controller.current?.update(enabled, sessions);
-  }, [enabled, sessions]);
+    controller.current?.update(
+      enabled,
+      sessions,
+      keepAwakeHoldAfterMs(holdAfter),
+    );
+  }, [enabled, sessions, holdAfter]);
 }

@@ -16,10 +16,6 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
   invoke: vi.fn(async () => undefined),
   isTauri: vi.fn(() => true),
 }));
-vi.mock("../../../platform/tauri/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../platform/tauri/platform")>()),
-  IS_WIN: true,
-}));
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -32,6 +28,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const session = (id: string, busy = false) => ({
@@ -54,7 +51,10 @@ describe("keep awake", () => {
     expect(isWorkingSession(waiting)).toBe(false);
     expect(isWorkingSession(removed)).toBe(false);
     expect(
-      isWorkingSession({ ...session("codex", true), harness: "codex" as const }),
+      isWorkingSession({
+        ...session("codex", true),
+        harness: "codex" as const,
+      }),
     ).toBe(true);
   });
 
@@ -70,7 +70,10 @@ describe("keep awake", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(true);
 
-    controller.update(true, [{ ...first, busy: false }, { ...second, busy: false }]);
+    controller.update(true, [
+      { ...first, busy: false },
+      { ...second, busy: false },
+    ]);
     await controller.settled();
     expect(send).toHaveBeenLastCalledWith(false);
   });
@@ -143,7 +146,9 @@ describe("keep awake", () => {
       return null;
     };
     await act(async () => {
-      root.render(createElement(Harness, { sessions: [session("active", true)] }));
+      root.render(
+        createElement(Harness, { sessions: [session("active", true)] }),
+      );
     });
     await act(async () => root.unmount());
     expect(invoke).not.toHaveBeenCalled();
@@ -160,17 +165,81 @@ describe("keep awake", () => {
     };
 
     await act(async () => {
-      root.render(createElement(Harness, { sessions: [session("active", true)] }));
+      root.render(
+        createElement(Harness, { sessions: [session("active", true)] }),
+      );
     });
     await vi.waitFor(() =>
       expect(
-        vi.mocked(invoke).mock.calls.filter(
-          ([command, args]) =>
-            command === "set_keep_awake" && args?.enabled === true,
-        ),
+        vi
+          .mocked(invoke)
+          .mock.calls.filter(
+            ([command, args]) =>
+              command === "set_keep_awake" && args?.enabled === true,
+          ),
       ).toHaveLength(2),
     );
     await act(async () => root.unmount());
+  });
+
+  it("holds the request after the last agent for the chosen duration", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn(async (_enabled: boolean) => undefined);
+    const controller = createKeepAwakeController(send);
+    const working = session("working", true);
+
+    controller.update(true, [working], 15 * 60 * 1000);
+    await controller.settled();
+    controller.update(true, [{ ...working, busy: false }], 15 * 60 * 1000);
+    await controller.settled();
+    expect(send).toHaveBeenLastCalledWith(true);
+
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000 - 1);
+    await controller.settled();
+    expect(send).toHaveBeenLastCalledWith(true);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await controller.settled();
+    expect(send).toHaveBeenLastCalledWith(false);
+  });
+
+  it("keeps the request until the setting is turned off when hold is forever", async () => {
+    const send = vi.fn(async (_enabled: boolean) => undefined);
+    const controller = createKeepAwakeController(send);
+    const working = session("working", true);
+
+    controller.update(true, [working], Number.POSITIVE_INFINITY);
+    controller.update(
+      true,
+      [{ ...working, busy: false }],
+      Number.POSITIVE_INFINITY,
+    );
+    await controller.settled();
+    expect(send.mock.calls).toEqual([[true]]);
+
+    controller.update(
+      false,
+      [{ ...working, busy: false }],
+      Number.POSITIVE_INFINITY,
+    );
+    await controller.settled();
+    expect(send).toHaveBeenLastCalledWith(false);
+  });
+
+  it("cancels a hold when another agent starts", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn(async (_enabled: boolean) => undefined);
+    const controller = createKeepAwakeController(send);
+    const first = session("first", true);
+
+    controller.update(true, [first], 15 * 60 * 1000);
+    controller.update(true, [{ ...first, busy: false }], 15 * 60 * 1000);
+    await controller.settled();
+    const second = session("second", true);
+    controller.update(true, [second], 15 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+    await controller.settled();
+    expect(send).toHaveBeenLastCalledWith(true);
   });
 
   it("reports this window's activity and releases it on pagehide", async () => {
@@ -182,14 +251,18 @@ describe("keep awake", () => {
       return null;
     };
     await act(async () => {
-      root.render(createElement(Harness, { sessions: [session("active", true)] }));
+      root.render(
+        createElement(Harness, { sessions: [session("active", true)] }),
+      );
     });
     await vi.waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("set_keep_awake", { enabled: true }),
     );
     window.dispatchEvent(new Event("pagehide"));
     await vi.waitFor(() =>
-      expect(invoke).toHaveBeenLastCalledWith("set_keep_awake", { enabled: false }),
+      expect(invoke).toHaveBeenLastCalledWith("set_keep_awake", {
+        enabled: false,
+      }),
     );
     await act(async () => root.unmount());
   });
