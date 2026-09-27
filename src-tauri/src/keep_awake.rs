@@ -47,6 +47,25 @@ impl<B: RequestBackend> Claims<B> {
         self.windows.values().any(|&display| display)
     }
 
+    fn in_sync(&self) -> bool {
+        if self.windows.is_empty() {
+            self.request.is_none()
+        } else {
+            self.request.is_some() && self.display == self.desired_display()
+        }
+    }
+
+    fn restore_window(&mut self, window: &str, previous: Option<bool>) {
+        match previous {
+            Some(display) => {
+                self.windows.insert(window.to_owned(), display);
+            }
+            None => {
+                self.windows.remove(window);
+            }
+        }
+    }
+
     fn sync_request(&mut self) -> Result<(), String> {
         if self.windows.is_empty() {
             self.display = false;
@@ -59,12 +78,28 @@ impl<B: RequestBackend> Claims<B> {
         if self.request.is_some() && self.display == display {
             return Ok(());
         }
-        if let Some(request) = self.request.take() {
-            self.backend.release(request)?;
+        // Hold the current request until its replacement exists so a failed
+        // reacquire cannot leave remaining windows unprotected.
+        let next = self.backend.acquire(display)?;
+        if let Some(previous) = self.request.replace(next) {
+            self.display = display;
+            self.backend.release(previous)?;
+        } else {
+            self.display = display;
         }
-        self.request = Some(self.backend.acquire(display)?);
-        self.display = display;
         Ok(())
+    }
+
+    fn sync_or_restore(&mut self, window: &str, previous: Option<bool>) -> Result<(), String> {
+        match self.sync_request() {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                if !self.in_sync() {
+                    self.restore_window(window, previous);
+                }
+                Err(error)
+            }
+        }
     }
 
     fn set(&mut self, window: &str, enabled: bool, display: bool) -> Result<(), String> {
@@ -73,21 +108,14 @@ impl<B: RequestBackend> Claims<B> {
                 return Ok(());
             }
             let previous = self.windows.insert(window.to_owned(), display);
-            if let Err(error) = self.sync_request() {
-                match previous {
-                    Some(previous) => {
-                        self.windows.insert(window.to_owned(), previous);
-                    }
-                    None => {
-                        self.windows.remove(window);
-                    }
-                }
-                return Err(error);
-            }
-        } else if self.windows.remove(window).is_some() {
-            self.sync_request()?;
+            self.sync_or_restore(window, previous)
+        } else if let Some(previous) = self.windows.remove(window) {
+            self.sync_or_restore(window, Some(previous))
+        } else if !self.in_sync() {
+            self.sync_request()
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     fn release_all(&mut self) -> Result<(), String> {
@@ -611,5 +639,24 @@ mod tests {
         assert_eq!(claims.backend.released.load(Ordering::SeqCst), 2);
         assert_eq!(claims.backend.acquired.load(Ordering::SeqCst), 3);
         assert!(claims.display);
+    }
+
+    #[test]
+    fn failed_display_change_can_retry_without_losing_other_window() {
+        let mut claims = Claims::new(MockBackend::default());
+        claims.set("first", true, true).unwrap();
+        claims.set("second", true, false).unwrap();
+
+        claims.backend.fail_acquire.store(true, Ordering::SeqCst);
+        assert!(claims.set("first", false, false).is_err());
+        assert!(claims.windows.contains_key("second"));
+        assert!(claims.request.is_some());
+
+        claims.backend.fail_acquire.store(false, Ordering::SeqCst);
+        claims.set("first", false, false).unwrap();
+        assert!(claims.request.is_some());
+        assert!(claims.windows.contains_key("second"));
+        assert!(!claims.windows.contains_key("first"));
+        assert!(!claims.display);
     }
 }
