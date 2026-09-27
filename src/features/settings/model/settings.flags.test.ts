@@ -76,6 +76,13 @@ describe.each([
     settings.KEEP_AWAKE_CHANGE_EVENT,
   ],
   [
+    "monocode.keepAwakeScreen",
+    settings.loadKeepAwakeScreen,
+    settings.saveKeepAwakeScreen,
+    false,
+    settings.KEEP_AWAKE_SCREEN_CHANGE_EVENT,
+  ],
+  [
     "monocode.closeToTray",
     settings.loadCloseToTray,
     settings.saveCloseToTray,

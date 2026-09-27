@@ -284,6 +284,7 @@ import {
   isKeepAwakeHoldAfter,
   loadKeepAwakeEnabled,
   loadKeepAwakeHoldAfter,
+  loadKeepAwakeScreen,
   loadLiveAgentsEnabled,
   loadModelControls,
   loadNotesEnabled,
@@ -302,6 +303,7 @@ import {
   saveGridArcadeEnabled,
   saveKeepAwakeEnabled,
   saveKeepAwakeHoldAfter,
+  saveKeepAwakeScreen,
   saveLiveAgentsEnabled,
   saveModelControls,
   saveNotesEnabled,
@@ -311,6 +313,7 @@ import {
   saveQuickComposerShortcut,
   subscribeKeepAwakeEnabled,
   subscribeKeepAwakeHoldAfter,
+  subscribeKeepAwakeScreen,
   subscribeKeybindings,
   type KeybindingOverride,
   saveTabAnimationsEnabled,
@@ -733,6 +736,11 @@ function GeneralPage({
     loadKeepAwakeHoldAfter,
     () => KEEP_AWAKE_HOLD_AFTER_DEFAULT,
   );
+  const keepAwakeScreen = useSyncExternalStore(
+    subscribeKeepAwakeScreen,
+    loadKeepAwakeScreen,
+    () => false,
+  );
   const [quickComposerEnabled, setQuickComposerEnabled] = useState(
     loadQuickComposerEnabled,
   );
@@ -806,6 +814,10 @@ function GeneralPage({
 
   const onKeepAwakeHoldAfter = (next: string) => {
     if (isKeepAwakeHoldAfter(next)) saveKeepAwakeHoldAfter(next);
+  };
+
+  const onKeepAwakeScreen = (next: boolean) => {
+    saveKeepAwakeScreen(next);
   };
 
   return (
@@ -912,6 +924,25 @@ function GeneralPage({
             onChange={onLiveAgentsEnabled}
           />
         </Row>
+        {IS_WIN && (
+          <Row
+            id="close-to-tray"
+            label="Close to tray"
+            description="Closing a window hides it to the system tray instead of quitting, so running agents keep going. Reopen from the tray icon, and quit for real from its menu. Turn this off to have close end the window."
+          >
+            <Toggle
+              label="Close to tray"
+              on={closeToTray}
+              onChange={onCloseToTray}
+            />
+          </Row>
+        )}
+      </Group>
+
+      <Group
+        title="Sleep"
+        description="Keep this computer awake while an agent is working."
+      >
         <Row
           id="keep-awake"
           label="Prevent sleep while agents work"
@@ -933,19 +964,18 @@ function GeneralPage({
             onChange={onKeepAwake}
           />
         </Row>
-        {IS_WIN && (
-          <Row
-            id="close-to-tray"
-            label="Close to tray"
-            description="Closing a window hides it to the system tray instead of quitting, so running agents keep going. Reopen from the tray icon, and quit for real from its menu. Turn this off to have close end the window."
-          >
-            <Toggle
-              label="Close to tray"
-              on={closeToTray}
-              onChange={onCloseToTray}
-            />
-          </Row>
-        )}
+        <Row
+          id="keep-awake-screen"
+          label="Keep the screen on"
+          description="Keep the display awake while the sleep setting is active. Closing the lid or choosing Sleep still works."
+        >
+          <Toggle
+            label="Keep the screen on"
+            on={keepAwakeScreen}
+            onChange={onKeepAwakeScreen}
+            disabled={!keepAwake}
+          />
+        </Row>
       </Group>
 
       <Group title="About">

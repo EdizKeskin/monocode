@@ -68,14 +68,14 @@ describe("keep awake", () => {
     controller.update(true, [{ ...first, busy: false }, second]);
     await controller.settled();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith(true);
+    expect(send).toHaveBeenCalledWith(true, false);
 
     controller.update(true, [
       { ...first, busy: false },
       { ...second, busy: false },
     ]);
     await controller.settled();
-    expect(send).toHaveBeenLastCalledWith(false);
+    expect(send).toHaveBeenLastCalledWith(false, false);
   });
 
   it("releases on setting off or window teardown in IPC order", async () => {
@@ -103,7 +103,10 @@ describe("keep awake", () => {
     controller.update(true, [session("working", true)]);
     controller.release();
     await controller.settled();
-    expect(send.mock.calls).toEqual([[true], [false]]);
+    expect(send.mock.calls).toEqual([
+      [true, false],
+      [false, false],
+    ]);
   });
 
   it("retries a failed enable while the agent is still working", async () => {
@@ -115,7 +118,10 @@ describe("keep awake", () => {
 
     controller.update(true, [session("working", true)]);
     await controller.settled();
-    expect(send.mock.calls).toEqual([[true], [true]]);
+    expect(send.mock.calls).toEqual([
+      [true, false],
+      [true, false],
+    ]);
   });
 
   it("allows a later update to retry after both enable attempts fail", async () => {
@@ -129,11 +135,18 @@ describe("keep awake", () => {
 
     controller.update(true, [working]);
     await controller.settled();
-    expect(send.mock.calls).toEqual([[true], [true]]);
+    expect(send.mock.calls).toEqual([
+      [true, false],
+      [true, false],
+    ]);
 
     controller.update(true, [working]);
     await controller.settled();
-    expect(send.mock.calls).toEqual([[true], [true], [true]]);
+    expect(send.mock.calls).toEqual([
+      [true, false],
+      [true, false],
+      [true, false],
+    ]);
   });
 
   it("does not invoke native IPC in a browser preview", async () => {
@@ -192,15 +205,15 @@ describe("keep awake", () => {
     await controller.settled();
     controller.update(true, [{ ...working, busy: false }], 15 * 60 * 1000);
     await controller.settled();
-    expect(send).toHaveBeenLastCalledWith(true);
+    expect(send).toHaveBeenLastCalledWith(true, false);
 
     await vi.advanceTimersByTimeAsync(15 * 60 * 1000 - 1);
     await controller.settled();
-    expect(send).toHaveBeenLastCalledWith(true);
+    expect(send).toHaveBeenLastCalledWith(true, false);
 
     await vi.advanceTimersByTimeAsync(1);
     await controller.settled();
-    expect(send).toHaveBeenLastCalledWith(false);
+    expect(send).toHaveBeenLastCalledWith(false, false);
   });
 
   it("keeps the request until the setting is turned off when hold is forever", async () => {
@@ -215,7 +228,7 @@ describe("keep awake", () => {
       Number.POSITIVE_INFINITY,
     );
     await controller.settled();
-    expect(send.mock.calls).toEqual([[true]]);
+    expect(send.mock.calls).toEqual([[true, false]]);
 
     controller.update(
       false,
@@ -223,7 +236,7 @@ describe("keep awake", () => {
       Number.POSITIVE_INFINITY,
     );
     await controller.settled();
-    expect(send).toHaveBeenLastCalledWith(false);
+    expect(send).toHaveBeenLastCalledWith(false, false);
   });
 
   it("cancels a hold when another agent starts", async () => {
@@ -239,7 +252,23 @@ describe("keep awake", () => {
     controller.update(true, [second], 15 * 60 * 1000);
     await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
     await controller.settled();
-    expect(send).toHaveBeenLastCalledWith(true);
+    expect(send).toHaveBeenLastCalledWith(true, false);
+  });
+
+  it("asks native to keep the display on when that setting is on", async () => {
+    const send = vi.fn(
+      async (_enabled: boolean, _display?: boolean) => undefined,
+    );
+    const controller = createKeepAwakeController(send);
+    const working = session("working", true);
+
+    controller.update(true, [working], 0, true);
+    await controller.settled();
+    expect(send).toHaveBeenLastCalledWith(true, true);
+
+    controller.update(true, [working], 0, false);
+    await controller.settled();
+    expect(send).toHaveBeenLastCalledWith(true, false);
   });
 
   it("reports this window's activity and releases it on pagehide", async () => {
@@ -256,12 +285,16 @@ describe("keep awake", () => {
       );
     });
     await vi.waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("set_keep_awake", { enabled: true }),
+      expect(invoke).toHaveBeenCalledWith("set_keep_awake", {
+        enabled: true,
+        display: false,
+      }),
     );
     window.dispatchEvent(new Event("pagehide"));
     await vi.waitFor(() =>
       expect(invoke).toHaveBeenLastCalledWith("set_keep_awake", {
         enabled: false,
+        display: false,
       }),
     );
     await act(async () => root.unmount());

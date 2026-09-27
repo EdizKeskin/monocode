@@ -211,6 +211,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords:
       "sleep awake idle running agents windows linux macos duration 15 30 hour forever hold after",
   },
+  {
+    id: "keep-awake-screen",
+    section: "general",
+    label: "Keep the screen on",
+    keywords: "sleep display screen blank dim lock awake",
+  },
   ...(IS_WIN
     ? [
         {
@@ -872,6 +878,38 @@ export function saveKeepAwakeHoldAfter(value: KeepAwakeHoldAfter): void {
         detail: value,
       }),
     );
+}
+
+const KEEP_AWAKE_SCREEN_KEY = "monocode.keepAwakeScreen";
+export const KEEP_AWAKE_SCREEN_DEFAULT = false;
+export const KEEP_AWAKE_SCREEN_CHANGE_EVENT =
+  "monocode:keep-awake-screen-change";
+
+export function loadKeepAwakeScreen(): boolean {
+  return readFlag(KEEP_AWAKE_SCREEN_KEY) ?? KEEP_AWAKE_SCREEN_DEFAULT;
+}
+
+export function saveKeepAwakeScreen(value: boolean): void {
+  writeFlag(KEEP_AWAKE_SCREEN_KEY, value);
+  if (typeof window !== "undefined")
+    window.dispatchEvent(
+      new CustomEvent<boolean>(KEEP_AWAKE_SCREEN_CHANGE_EVENT, {
+        detail: value,
+      }),
+    );
+}
+
+export function subscribeKeepAwakeScreen(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === KEEP_AWAKE_SCREEN_KEY || event.key === null) onChange();
+  };
+  window.addEventListener(KEEP_AWAKE_SCREEN_CHANGE_EVENT, onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(KEEP_AWAKE_SCREEN_CHANGE_EVENT, onChange);
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
 export function subscribeKeepAwakeHoldAfter(onChange: () => void): () => void {

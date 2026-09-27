@@ -6,16 +6,18 @@ import {
   keepAwakeHoldAfterMs,
   loadKeepAwakeEnabled,
   loadKeepAwakeHoldAfter,
+  loadKeepAwakeScreen,
   subscribeKeepAwakeEnabled,
   subscribeKeepAwakeHoldAfter,
+  subscribeKeepAwakeScreen,
 } from "./settings";
 
 // React StrictMode can replace a controller before its final IPC settles.
 let nativeQueue: Promise<void> = Promise.resolve();
 
-function sendNative(enabled: boolean): Promise<void> {
+function sendNative(enabled: boolean, display = false): Promise<void> {
   const operation = nativeQueue.then(() =>
-    invoke<void>("set_keep_awake", { enabled }),
+    invoke<void>("set_keep_awake", { enabled, display }),
   );
   nativeQueue = operation.then(
     () => undefined,
@@ -35,15 +37,17 @@ type KeepAwakePhase = "off" | "working" | "holding";
 
 /** Each webview reports only its own activity; the native command combines windows. */
 export function createKeepAwakeController(
-  send: (enabled: boolean) => Promise<unknown>,
+  send: (enabled: boolean, display?: boolean) => Promise<unknown>,
 ) {
   let desired = false;
+  let desiredDisplay = false;
   let disposed = false;
   let failed = false;
   let pending = Promise.resolve();
   let phase: KeepAwakePhase = "off";
   let holdSince = 0;
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
+  let keepScreen = false;
 
   const clearTimer = () => {
     if (holdTimer == null) return;
@@ -51,20 +55,21 @@ export function createKeepAwakeController(
     holdTimer = null;
   };
 
-  const set = (enabled: boolean) => {
-    if (desired === enabled && !failed) return;
+  const set = (enabled: boolean, display = false) => {
+    if (desired === enabled && desiredDisplay === display && !failed) return;
     desired = enabled;
+    desiredDisplay = display;
     failed = false;
     // Preserve transition order if a turn finishes before the first IPC returns.
     pending = pending.then(async () => {
       try {
-        await send(enabled);
+        await send(enabled, display);
       } catch {
-        if (desired !== enabled) return;
+        if (desired !== enabled || desiredDisplay !== display) return;
         try {
-          await send(enabled);
+          await send(enabled, display);
         } catch {
-          if (desired === enabled) failed = true;
+          if (desired === enabled && desiredDisplay === display) failed = true;
         }
       }
     });
@@ -79,7 +84,7 @@ export function createKeepAwakeController(
     }
     if (!Number.isFinite(holdAfterMs)) {
       clearTimer();
-      set(true);
+      set(true, keepScreen);
       return;
     }
     const remaining = holdSince + holdAfterMs - Date.now();
@@ -95,12 +100,18 @@ export function createKeepAwakeController(
       phase = "off";
       set(false);
     }, remaining);
-    set(true);
+    set(true, keepScreen);
   };
 
   return {
-    update(enabled: boolean, sessions: readonly Session[], holdAfterMs = 0) {
+    update(
+      enabled: boolean,
+      sessions: readonly Session[],
+      holdAfterMs = 0,
+      screen = false,
+    ) {
       if (disposed) return;
+      keepScreen = screen;
       const busy = sessions.some(isWorkingSession);
       if (!enabled) {
         phase = "off";
@@ -111,7 +122,7 @@ export function createKeepAwakeController(
       if (busy) {
         phase = "working";
         clearTimer();
-        set(true);
+        set(true, keepScreen);
         return;
       }
       if (phase === "working") {
@@ -146,6 +157,11 @@ export function useKeepAwake(sessions: readonly Session[]): void {
     loadKeepAwakeHoldAfter,
     () => KEEP_AWAKE_HOLD_AFTER_DEFAULT,
   );
+  const keepScreen = useSyncExternalStore(
+    subscribeKeepAwakeScreen,
+    loadKeepAwakeScreen,
+    () => false,
+  );
   const controller = useRef<ReturnType<
     typeof createKeepAwakeController
   > | null>(null);
@@ -170,6 +186,7 @@ export function useKeepAwake(sessions: readonly Session[]): void {
       enabled,
       sessions,
       keepAwakeHoldAfterMs(holdAfter),
+      keepScreen,
     );
-  }, [enabled, sessions, holdAfter]);
+  }, [enabled, sessions, holdAfter, keepScreen]);
 }

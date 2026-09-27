@@ -148,6 +148,25 @@ describe("settings pages", () => {
     ).find((button) => button.textContent?.includes("15 minutes"))!;
     await act(async () => fifteen.click());
     expect(localStorage.getItem("monocode.keepAwakeHoldAfter")).toBe("15m");
+
+    const screen = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Keep the screen on"]',
+    )!;
+    expect(screen.getAttribute("aria-checked")).toBe("false");
+    expect(screen.disabled).toBe(false);
+    await act(async () => screen.click());
+    expect(localStorage.getItem("monocode.keepAwakeScreen")).toBe("1");
+
+    const sleepGroup = Array.from(container.querySelectorAll("section")).find(
+      (section) => section.textContent?.includes("Keep this computer awake"),
+    )!;
+    expect(
+      sleepGroup.querySelector('[data-setting-id="keep-awake"]'),
+    ).not.toBeNull();
+    expect(
+      sleepGroup.querySelector('[data-setting-id="keep-awake-screen"]'),
+    ).not.toBeNull();
+    expect(sleepGroup.querySelector('[data-setting-id="file-tabs"]')).toBeNull();
   });
 
   it("mentions the Windows Modern Standby limit only on Windows", async () => {
