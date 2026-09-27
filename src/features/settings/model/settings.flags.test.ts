@@ -5,7 +5,9 @@ import * as appearance from "./appearance";
 
 const platform = vi.hoisted(() => ({ isWindows: true }));
 vi.mock("../../../platform/tauri/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../platform/tauri/platform")>()),
+  ...(await importOriginal<
+    typeof import("../../../platform/tauri/platform")
+  >()),
   get IS_WIN() {
     return platform.isWindows;
   },
@@ -72,6 +74,13 @@ describe.each([
     settings.saveKeepAwakeEnabled,
     false,
     settings.KEEP_AWAKE_CHANGE_EVENT,
+  ],
+  [
+    "monocode.keepAwakeScreen",
+    settings.loadKeepAwakeScreen,
+    settings.saveKeepAwakeScreen,
+    false,
+    settings.KEEP_AWAKE_SCREEN_CHANGE_EVENT,
   ],
   [
     "monocode.closeToTray",
@@ -203,13 +212,23 @@ it("disables close-to-tray outside Windows without consulting storage", () => {
   expect(read).not.toHaveBeenCalled();
 });
 
-it("disables keep-awake outside Windows without consulting storage", () => {
+it("reads keep-awake on Linux and macOS from storage", () => {
   platform.isWindows = false;
   settings.saveKeepAwakeEnabled(true);
-  const read = vi.spyOn(localStorage, "getItem");
 
-  expect(settings.loadKeepAwakeEnabled()).toBe(false);
-  expect(read).not.toHaveBeenCalled();
+  expect(settings.loadKeepAwakeEnabled()).toBe(true);
+});
+
+it("persists how long to stay awake after an agent ends", () => {
+  expect(settings.loadKeepAwakeHoldAfter()).toBe("0");
+  settings.saveKeepAwakeHoldAfter("15m");
+  expect(settings.loadKeepAwakeHoldAfter()).toBe("15m");
+  expect(settings.keepAwakeHoldAfterMs("15m")).toBe(15 * 60 * 1000);
+  expect(settings.keepAwakeHoldAfterMs("forever")).toBe(
+    Number.POSITIVE_INFINITY,
+  );
+  localStorage.setItem("monocode.keepAwakeHoldAfter", "nope");
+  expect(settings.loadKeepAwakeHoldAfter()).toBe("0");
 });
 
 it("notifies another window when the keep-awake setting changes", () => {
