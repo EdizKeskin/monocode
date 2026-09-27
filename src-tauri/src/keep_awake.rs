@@ -371,8 +371,34 @@ mod linux_backend {
         }
     }
 
+    /// Desktop-session idle inhibitor (GNOME `org.gnome.SessionManager`).
+    ///
+    /// GNOME's power plugin can suspend the session after inactivity even when
+    /// logind's `idle` inhibitor is held, because the plugin tracks session
+    /// idleness independently. Acquiring the GNOME session inhibitor with
+    /// flag `8` (idle) prevents the session from being marked idle, which in
+    /// turn prevents the power plugin's automatic suspend. This is best-effort:
+    /// non-GNOME desktops simply won't have this D-Bus service.
+    struct SessionInhibit {
+        conn: Connection,
+        cookie: u32,
+    }
+
+    impl Drop for SessionInhibit {
+        fn drop(&mut self) {
+            let _ = self.conn.call_method(
+                Some("org.gnome.SessionManager"),
+                "/org/gnome/SessionManager",
+                Some("org.gnome.SessionManager"),
+                "Uninhibit",
+                &(self.cookie,),
+            );
+        }
+    }
+
     pub(super) struct LinuxHandle {
         idle_fd: OwnedFd,
+        session_idle: Option<SessionInhibit>,
         display: Option<ScreensaverInhibit>,
     }
 
@@ -391,6 +417,25 @@ mod linux_backend {
             .body()
             .deserialize()
             .map_err(|error| error.to_string())
+    }
+
+    /// Best-effort GNOME session idle inhibitor (flag `8`).
+    ///
+    /// Returns `None` on non-GNOME desktops where the service is absent.
+    fn inhibit_session_idle() -> Option<SessionInhibit> {
+        let conn = Connection::session().ok()?;
+        let reply = conn
+            .call_method(
+                Some("org.gnome.SessionManager"),
+                "/org/gnome/SessionManager",
+                Some("org.gnome.SessionManager"),
+                "Inhibit",
+                // (app_id, toplevel_xid, reason, flags): flag 8 = idle
+                &("MonoCode", 0u32, REASON, 8u32),
+            )
+            .ok()?;
+        let cookie: u32 = reply.body().deserialize().ok()?;
+        Some(SessionInhibit { conn, cookie })
     }
 
     fn inhibit_screensaver() -> Result<ScreensaverInhibit, String> {
@@ -416,18 +461,22 @@ mod linux_backend {
 
         fn acquire(&self, display: bool) -> Result<LinuxHandle, String> {
             let idle_fd = inhibit_idle()?;
+            let session_idle = inhibit_session_idle();
             if !display {
                 return Ok(LinuxHandle {
                     idle_fd,
+                    session_idle,
                     display: None,
                 });
             }
             match inhibit_screensaver() {
                 Ok(screensaver) => Ok(LinuxHandle {
                     idle_fd,
+                    session_idle,
                     display: Some(screensaver),
                 }),
                 Err(error) => {
+                    drop(session_idle);
                     drop(idle_fd);
                     Err(error)
                 }
@@ -435,8 +484,13 @@ mod linux_backend {
         }
 
         fn release(&self, handle: LinuxHandle) -> Result<(), String> {
-            let LinuxHandle { idle_fd, display } = handle;
+            let LinuxHandle {
+                idle_fd,
+                session_idle,
+                display,
+            } = handle;
             drop(display);
+            drop(session_idle);
             drop(idle_fd);
             Ok(())
         }
