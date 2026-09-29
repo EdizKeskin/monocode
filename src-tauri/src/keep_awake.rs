@@ -105,6 +105,9 @@ impl<B: RequestBackend> Claims<B> {
     fn set(&mut self, window: &str, enabled: bool, display: bool) -> Result<(), String> {
         if enabled {
             if self.windows.get(window) == Some(&display) && self.request.is_some() {
+                if !self.in_sync() {
+                    return self.sync_request();
+                }
                 return Ok(());
             }
             let previous = self.windows.insert(window.to_owned(), display);
@@ -118,6 +121,14 @@ impl<B: RequestBackend> Claims<B> {
         }
     }
 
+    fn window_closed(&mut self, window: &str) -> Result<(), String> {
+        let removed = self.windows.remove(window).is_some();
+        if removed || !self.in_sync() {
+            self.sync_request()
+        } else {
+            Ok(())
+        }
+    }
     fn release_all(&mut self) -> Result<(), String> {
         self.windows.clear();
         self.display = false;
@@ -539,7 +550,14 @@ mod platform {
         }
 
         pub fn window_closed(&self, window: &str) {
-            if let Err(error) = self.set(window, false, false) {
+            let result = match self.0.lock() {
+                Ok(mut claims) => claims.window_closed(window),
+                Err(poisoned) => {
+                    let _ = poisoned.into_inner().release_all();
+                    Err("keep-awake state was poisoned".into())
+                }
+            };
+            if let Err(error) = result {
                 eprintln!("keep-awake window cleanup: {error}");
             }
         }
@@ -712,5 +730,27 @@ mod tests {
         assert!(claims.windows.contains_key("second"));
         assert!(!claims.windows.contains_key("first"));
         assert!(!claims.display);
+    }
+
+    #[test]
+    fn failed_sync_on_window_closed_does_not_restore_closed_window_and_reconciles() {
+        let mut claims = Claims::new(MockBackend::default());
+        claims.set("first", true, true).unwrap();
+        claims.set("second", true, false).unwrap();
+        assert!(claims.display);
+
+        claims.backend.fail_acquire.store(true, Ordering::SeqCst);
+        assert!(claims.window_closed("first").is_err());
+        assert!(!claims.windows.contains_key("first"));
+        assert!(claims.windows.contains_key("second"));
+        assert!(!claims.in_sync());
+        assert!(claims.display);
+
+        claims.backend.fail_acquire.store(false, Ordering::SeqCst);
+        claims.set("second", true, false).unwrap();
+        assert!(claims.in_sync());
+        assert!(!claims.display);
+        assert!(claims.windows.contains_key("second"));
+        assert!(!claims.windows.contains_key("first"));
     }
 }
