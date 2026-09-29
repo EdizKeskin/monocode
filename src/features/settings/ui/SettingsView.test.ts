@@ -471,7 +471,7 @@ describe("settings pages", () => {
     )!;
     expect(retry).not.toBeNull();
     await act(async () => retry.click());
-    expect(invoke).toHaveBeenCalledWith("harness_resolve_codex");
+    expect(invoke).toHaveBeenCalledWith("harness_resolve_codex", undefined);
   });
 
   it("reopens, scrolls to, focuses and highlights the same project on a repeated notification settings request", async () => {
@@ -669,6 +669,9 @@ describe("settings pages", () => {
 
   it("shows path details for every Agent CLI", async () => {
     await render("providers");
+    expect(
+      vi.mocked(invoke).mock.calls.some(([command]) => command === "harness_exec"),
+    ).toBe(false);
     for (const harness of HARNESSES) {
       expect(
         container.querySelector(
