@@ -86,7 +86,7 @@ export type HarnessAdapter = {
   /** Optional LLM tab title for the first turn. */
   generateTitle?(input: TitleInput): Promise<GeneratedSessionTitle | null>;
   /** Optional LLM commit message from staged changes. */
-  generateCommitMessage?(cwd: string): Promise<string>;
+  generateCommitMessage?(cwd: string, signal?: AbortSignal): Promise<string>;
   /** Optional LLM pull request title/body from branch diff context. */
   generatePrContent?(
     cwd: string,
@@ -377,8 +377,10 @@ export function bindHarnessSession(
  * Boot used to refresh every adapter; that spawned unused CLIs (Pi with
  * extensions can sit at ~1GB) even when the workspace never touched them.
  */
+/** `force` re-reads a catalog that already loaded, e.g. after a CLI update. */
 export async function refreshHarnessCatalogs(
   ids: Iterable<HarnessId>,
+  options?: { force?: boolean },
 ): Promise<void> {
   const wanted = new Set(ids);
   if (wanted.size === 0) return;
@@ -386,7 +388,8 @@ export async function refreshHarnessCatalogs(
     [...adapters.values()]
       .filter((adapter) => wanted.has(adapter.id))
       .map(async (adapter) => {
-        if (!adapter.refreshCatalog || hasLiveCatalog(adapter.id)) return;
+        if (!adapter.refreshCatalog) return;
+        if (!options?.force && hasLiveCatalog(adapter.id)) return;
         await adapter.refreshCatalog().catch((error: unknown) => {
           console.debug(`[monocode] ${adapter.id} catalog`, error);
         });
@@ -406,12 +409,14 @@ export async function generateHarnessTitle(
 export async function generateHarnessCommitMessage(
   harness: HarnessId,
   cwd: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const adapter = requireHarness(harness);
   if (!adapter.generateCommitMessage) {
     throw new Error(`${harness} does not support commit message generation`);
   }
-  return adapter.generateCommitMessage(cwd);
+  signal?.throwIfAborted();
+  return adapter.generateCommitMessage(cwd, signal);
 }
 
 export async function generateHarnessPrContent(

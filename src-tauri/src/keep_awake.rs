@@ -382,14 +382,12 @@ mod linux_backend {
         }
     }
 
-    /// Desktop-session idle inhibitor (GNOME `org.gnome.SessionManager`).
+    /// Desktop-session suspend inhibitor (GNOME `org.gnome.SessionManager`).
     ///
-    /// GNOME's power plugin can suspend the session after inactivity even when
-    /// logind's `idle` inhibitor is held, because the plugin tracks session
-    /// idleness independently. Acquiring the GNOME session inhibitor with
-    /// flag `8` (idle) prevents the session from being marked idle, which in
-    /// turn prevents the power plugin's automatic suspend. This is best-effort:
-    /// non-GNOME desktops simply won't have this D-Bus service.
+    /// GNOME can suspend the session after inactivity even when logind's `idle`
+    /// inhibitor is held. Inhibit suspend instead of session idleness so GNOME
+    /// can still lock the screen automatically. Non-GNOME desktops do not have
+    /// this D-Bus service.
     struct SessionInhibit {
         conn: Connection,
         cookie: u32,
@@ -409,7 +407,7 @@ mod linux_backend {
 
     pub(super) struct LinuxHandle {
         idle_fd: OwnedFd,
-        session_idle: Option<SessionInhibit>,
+        session_suspend: Option<SessionInhibit>,
         display: Option<ScreensaverInhibit>,
     }
 
@@ -430,10 +428,10 @@ mod linux_backend {
             .map_err(|error| error.to_string())
     }
 
-    /// Best-effort GNOME session idle inhibitor (flag `8`).
+    /// Best-effort GNOME session suspend inhibitor (flag `4`).
     ///
     /// Returns `None` on non-GNOME desktops where the service is absent.
-    fn inhibit_session_idle() -> Option<SessionInhibit> {
+    fn inhibit_session_suspend() -> Option<SessionInhibit> {
         let conn = Connection::session().ok()?;
         let reply = conn
             .call_method(
@@ -441,8 +439,8 @@ mod linux_backend {
                 "/org/gnome/SessionManager",
                 Some("org.gnome.SessionManager"),
                 "Inhibit",
-                // (app_id, toplevel_xid, reason, flags): flag 8 = idle
-                &("MonoCode", 0u32, REASON, 8u32),
+                // (app_id, toplevel_xid, reason, flags): flag 4 = suspend
+                &("MonoCode", 0u32, REASON, 4u32),
             )
             .ok()?;
         let cookie: u32 = reply.body().deserialize().ok()?;
@@ -472,22 +470,22 @@ mod linux_backend {
 
         fn acquire(&self, display: bool) -> Result<LinuxHandle, String> {
             let idle_fd = inhibit_idle()?;
-            let session_idle = inhibit_session_idle();
+            let session_suspend = inhibit_session_suspend();
             if !display {
                 return Ok(LinuxHandle {
                     idle_fd,
-                    session_idle,
+                    session_suspend,
                     display: None,
                 });
             }
             match inhibit_screensaver() {
                 Ok(screensaver) => Ok(LinuxHandle {
                     idle_fd,
-                    session_idle,
+                    session_suspend,
                     display: Some(screensaver),
                 }),
                 Err(error) => {
-                    drop(session_idle);
+                    drop(session_suspend);
                     drop(idle_fd);
                     Err(error)
                 }
@@ -497,11 +495,11 @@ mod linux_backend {
         fn release(&self, handle: LinuxHandle) -> Result<(), String> {
             let LinuxHandle {
                 idle_fd,
-                session_idle,
+                session_suspend,
                 display,
             } = handle;
             drop(display);
-            drop(session_idle);
+            drop(session_suspend);
             drop(idle_fd);
             Ok(())
         }

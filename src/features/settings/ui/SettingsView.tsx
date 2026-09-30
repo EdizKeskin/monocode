@@ -136,8 +136,7 @@ import {
   saveUiScale,
   subscribeUiScale,
   UI_SCALE_DEFAULT,
-  UI_SCALE_MAX,
-  UI_SCALE_MIN,
+  UI_SCALE_PERCENTS,
 } from "../model/uiScale";
 import {
   getHarnessAvailabilitySnapshot,
@@ -221,9 +220,9 @@ import { removeProviderAccountCredentials } from "../../providers/model/provider
 import {
   identityKey,
   identityOrganizationTag,
-  identitySubtitle,
   useProviderAccountIdentities,
 } from "../../providers/model/providerAccountIdentity";
+import { ProviderAccountSubtitle } from "../../providers/ui/ProviderAccountSubtitle";
 import {
   accountStatus,
   accountUsageKey,
@@ -962,7 +961,9 @@ function GeneralPage({
           description={
             IS_WIN
               ? "Prevent idle sleep during agent work, and optionally after the last agent finishes. Closing the lid or choosing Sleep still works. On battery-powered Modern Standby PCs, Windows may stop the request five minutes after the sleep timeout."
-              : "Prevent idle sleep during agent work, and optionally after the last agent finishes. Closing the lid or choosing Sleep still works."
+              : IS_MAC
+                ? "Prevent idle sleep during agent work, and optionally after the last agent finishes. Closing the lid or choosing Sleep still works."
+                : "Prevent idle sleep during agent work, and optionally after the last agent finishes. Automatic screen locking remains available. On GNOME, choosing Sleep may be blocked while this is active."
           }
         >
           <Select
@@ -980,7 +981,9 @@ function GeneralPage({
         <Row
           id="keep-awake-screen"
           label="Keep the screen on"
-          description="Keep the display awake while the sleep setting is active. Closing the lid or choosing Sleep still works."
+          description={IS_WIN || IS_MAC
+            ? "Keep the display awake while the sleep setting is active. Closing the lid or choosing Sleep still works."
+            : "Keep the display awake while the sleep setting is active. Automatic screen locking may be prevented."}
         >
           <Toggle
             label="Keep the screen on"
@@ -2275,14 +2278,14 @@ function AppearancePage({ appearance }: { appearance: AppearanceSettings }) {
           label="Interface scale"
           description="Zoom the whole interface. You can also use Ctrl+=, Ctrl+-, and Ctrl+0 (Cmd on macOS)."
         >
-          <Slider
+          <Select
             label="Interface scale"
-            value={Math.round(appearance.uiScale * 100)}
-            display={`${Math.round(appearance.uiScale * 100)}%`}
-            min={Math.round(UI_SCALE_MIN * 100)}
-            max={Math.round(UI_SCALE_MAX * 100)}
-            step={10}
-            onChange={appearance.onUiScale}
+            value={String(Math.round(appearance.uiScale * 100))}
+            options={UI_SCALE_PERCENTS.map((percent) => ({
+              value: String(percent),
+              label: `${percent}%`,
+            }))}
+            onChange={(value) => appearance.onUiScale(Number(value))}
           />
         </Row>
         <Row
@@ -3502,12 +3505,15 @@ function ProviderAccountsSettings() {
                           status={accountStatus(limits, usage.now)}
                           className="shrink-0"
                         />
-                        <span className="min-w-0 truncate text-content/30">
-                          {identitySubtitle(identity) ??
-                            (account.isDefault
+                        <ProviderAccountSubtitle
+                          identity={identity}
+                          fallback={
+                            account.isDefault
                               ? "Provider CLI profile"
-                              : "Isolated profile")}
-                        </span>
+                              : "Isolated profile"
+                          }
+                          className="truncate text-content/30"
+                        />
                       </div>
                     </div>
                     <AccountUsageMeters limits={limits} now={usage.now} />
