@@ -54,6 +54,18 @@ describe("historyWithLiveSessions", () => {
     })),
   };
 
+  it("never lists an ephemeral session, even while it is working", () => {
+    const run = {
+      ...newSession("codex", "/tmp/project-a"),
+      id: "habit-run",
+      title: "Skull · Daily useful PR check",
+      ephemeral: true,
+      busy: true,
+      blocks: [{ id: "u", role: "user" as const, text: "check PRs" }],
+    };
+    expect(historyWithLiveSessions([], [run], "/tmp/project-a")).toEqual([]);
+  });
+
   it("groups live and already-saved workers under their lead before adoption effects run", () => {
     const sessions = ["lead", "worker-a", "worker-b"].map((id) => ({
       ...newSession("codex", run.cwd),
@@ -102,6 +114,29 @@ describe("historyWithLiveSessions", () => {
     );
     expect(replacement.map((row) => row.id)).toEqual(["lead"]);
     expect(replacement[0].orchestration?.tasks).toEqual([]);
+  });
+
+  it("shows a live generated title and work item before the next persist", () => {
+    const cwd = "/tmp/project-a";
+    const linkedWorkItem = {
+      kind: "pr" as const,
+      repo: "acme/app",
+      number: 42,
+      url: "https://github.com/acme/app/pull/42",
+    };
+    const session = {
+      ...newSession("cursor", cwd),
+      id: "live",
+      title: "cursor · Fix tab title refresh",
+      linkedWorkItem,
+      blocks: [{ id: "u", role: "user" as const, text: "Fix PR #42" }],
+      busy: true,
+    };
+    const rows = historyWithLiveSessions([summary("live", cwd)], [session], cwd);
+    expect(rows[0]).toMatchObject({
+      title: "cursor · Fix tab title refresh",
+      linkedWorkItem,
+    });
   });
 
   it("does not inject an internal worker without a loaded run", () => {

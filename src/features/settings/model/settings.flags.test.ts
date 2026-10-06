@@ -83,6 +83,13 @@ describe.each([
     settings.KEEP_AWAKE_SCREEN_CHANGE_EVENT,
   ],
   [
+    "monocode.monosEnabled",
+    settings.loadMonosEnabled,
+    settings.saveMonosEnabled,
+    true,
+    "monocode:monos-enabled-change",
+  ],
+  [
     "monocode.closeToTray",
     settings.loadCloseToTray,
     settings.saveCloseToTray,
@@ -107,7 +114,7 @@ describe.each([
     "monocode.bodyGlass",
     appearance.loadBodyGlass,
     appearance.saveBodyGlass,
-    true,
+    appearance.BODY_GLASS_DEFAULT,
     undefined,
   ],
   [

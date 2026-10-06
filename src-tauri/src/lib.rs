@@ -22,7 +22,10 @@ mod link_preview;
 mod macos;
 #[cfg(target_os = "macos")]
 mod macos_background;
+mod mcp;
 mod menu;
+mod mono;
+mod mono_transcript;
 mod notes;
 mod notifications;
 mod pasteboard;
@@ -425,6 +428,12 @@ pub fn run() {
             harness::harness_resolve_configured,
             harness::harness_runtime_binary_paths,
             harness::harness_resolve_claude,
+            harness::claude_mcp_list,
+            mcp::mcp_discover,
+            mcp::mcp_add,
+            harness::claude_mcp_add,
+            harness::claude_mcp_remove,
+            harness::mcp_provider_login,
             harness::harness_resolve_omp,
             harness::harness_resolve_pi,
             harness::harness_resolve_fx,
@@ -461,6 +470,10 @@ pub fn run() {
             session_store::session_search,
             session_store::cancel_session_search,
             session_store::session_get,
+            mono_transcript::mono_session_get,
+            mono_transcript::mono_session_page,
+            mono_transcript::mono_session_upsert,
+            mono_transcript::mono_session_find,
             session_store::session_delete,
             session_store::session_set_archived,
             session_store::session_set_pinned,
@@ -476,6 +489,9 @@ pub fn run() {
             notes::notes_delete,
             notes::notes_save_image,
             notes::notes_image_path,
+            mono::mono_load,
+            mono::mono_read,
+            mono::mono_save,
             checkpoint::session_checkpoint_ensure,
             checkpoint::session_checkpoint_prepare,
             checkpoint::session_checkpoint_capture,
